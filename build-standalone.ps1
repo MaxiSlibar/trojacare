@@ -79,8 +79,11 @@ foreach ($k in $embeddedScripts.Keys) {
     [IO.File]::WriteAllBytes($target, $bytes)
 }
 
-# Reports-Ordner im Benutzer-Dokumenten-Verzeichnis (oder neben EXE)
-$exeDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+# Reports-Ordner neben EXE finden (funktioniert auch in kompilierter EXE)
+$exeDir = $null
+try { $exeDir = Split-Path -Parent ([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName) } catch {}
+if (-not $exeDir -and $PSScriptRoot) { $exeDir = $PSScriptRoot }
+if (-not $exeDir -and $MyInvocation.MyCommand.Path) { $exeDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $exeDir) { $exeDir = [Environment]::GetFolderPath('Desktop') }
 $reportsRoot = Join-Path $exeDir 'trojacare-reports'
 if (-not (Test-Path $reportsRoot)) { New-Item -ItemType Directory -Path $reportsRoot -Force | Out-Null }
@@ -151,16 +154,16 @@ $allBtn.FlatStyle = 'Flat'
 $allBtn.Font = New-Object Drawing.Font('Segoe UI',11,[Drawing.FontStyle]::Bold)
 $form.Controls.Add($allBtn)
 
-$output = New-Object Windows.Forms.TextBox
+$output = New-Object Windows.Forms.RichTextBox
 $output.Location = New-Object Drawing.Point(20,($y+60))
 $output.Size = New-Object Drawing.Size(670,200)
-$output.Multiline = $true
 $output.ScrollBars = 'Vertical'
 $output.BackColor = [Drawing.Color]::FromArgb(15,15,20)
 $output.ForeColor = [Drawing.Color]::LightGreen
 $output.Font = New-Object Drawing.Font('Consolas',9)
 $output.ReadOnly = $true
 $output.Anchor = 'Top,Bottom,Left,Right'
+$output.DetectUrls = $false
 $form.Controls.Add($output)
 
 $statusLabel = New-Object Windows.Forms.Label
@@ -182,8 +185,11 @@ $openBtn.Anchor = 'Bottom,Right'
 $form.Controls.Add($openBtn)
 
 function Write-Log($msg, $color='LightGreen') {
-    $output.SelectionColor = [Drawing.Color]::$color
+    $output.SelectionStart = $output.TextLength
+    $output.SelectionLength = 0
+    try { $output.SelectionColor = [Drawing.Color]::$color } catch {}
     $output.AppendText("$(Get-Date -f 'HH:mm:ss')  $msg`r`n")
+    $output.ScrollToCaret()
     [System.Windows.Forms.Application]::DoEvents()
 }
 
