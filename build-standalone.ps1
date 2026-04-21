@@ -56,6 +56,9 @@ try {
     $OutputEncoding = [System.Text.Encoding]::UTF8
 } catch {}
 
+# Execution Policy fuer diesen Prozess auf Bypass (damit eingebettete Scripts laufen)
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue } catch {}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Start-Process powershell -Verb RunAs -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
@@ -508,7 +511,10 @@ function Invoke-ScanFile($file) {
     $statusLabel.Text = "Scan l${AE}uft: $file ..."
     Write-Log "Starte $file"
     try {
-        & $path -OutputRoot $reportsRoot *>&1 | ForEach-Object {
+        # Script als ScriptBlock laden - umgeht ExecutionPolicy komplett
+        $content = Get-Content -Raw -LiteralPath $path -Encoding UTF8
+        $sb = [ScriptBlock]::Create($content)
+        & $sb -OutputRoot $reportsRoot *>&1 | ForEach-Object {
             $line = $_.ToString()
             if ($line.Trim()) { Write-Log $line }
         }
