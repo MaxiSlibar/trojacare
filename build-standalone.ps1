@@ -94,10 +94,10 @@ $refreshText = "${REFRESH} Aktualisieren"
 $folderText = "Report-Ordner ${OE}ffnen"
 
 $scans = @(
-    @{ Name='Netzwerk-Scan';          File='Scan-Connections.ps1'; Info='Verbindungen, Ports, Autostart, DNS-Cache' }
-    @{ Name='Stealth-Scan';           File='Scan-Stealth.ps1';     Info='Rootkit-Hinweise, WMI-Persistenz, Sideloading' }
-    @{ Name="Forensics (30 Tage)";    File='Scan-Forensics.ps1';   Info='PC an/aus, Logons, USB-Historie, Prefetch' }
-    @{ Name='Deep-Scan';              File='Scan-Deep.ps1';        Info='AppInit, IFEO, LSA, Root-Zertifikate' }
+    @{ Name='Netzwerk-Scan';          File='Scan-Connections.ps1'; Info='Verbindungen, Ports, Autostart, DNS-Cache';       Duration='~30 Sek' }
+    @{ Name='Stealth-Scan';           File='Scan-Stealth.ps1';     Info='Rootkit-Hinweise, WMI-Persistenz, Sideloading';    Duration='~1-2 Min' }
+    @{ Name="Forensics (30 Tage)";    File='Scan-Forensics.ps1';   Info='PC an/aus, Logons, USB-Historie, Prefetch';        Duration='~2-3 Min' }
+    @{ Name='Deep-Scan';              File='Scan-Deep.ps1';        Info='AppInit, IFEO, LSA, Root-Zertifikate';             Duration='~3-5 Min' }
 )
 
 # ========== FARBEN ==========
@@ -199,18 +199,26 @@ foreach ($s in $scans) {
 
     $lbl = New-Object Windows.Forms.Label
     $lbl.Text = $s.Info
-    $lbl.Location = New-Object Drawing.Point(265,18)
-    $lbl.Size = New-Object Drawing.Size(630,20)
+    $lbl.Location = New-Object Drawing.Point(265,10)
+    $lbl.Size = New-Object Drawing.Size(530,20)
     $lbl.ForeColor = $C_MUTED
     $lbl.Font = New-Object Drawing.Font('Segoe UI',10)
     $card.Controls.Add($lbl)
+
+    $durLbl = New-Object Windows.Forms.Label
+    $durLbl.Text = "Dauer: $($s.Duration)"
+    $durLbl.Location = New-Object Drawing.Point(265,30)
+    $durLbl.Size = New-Object Drawing.Size(300,18)
+    $durLbl.ForeColor = [Drawing.Color]::FromArgb(120,180,220)
+    $durLbl.Font = New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Italic)
+    $card.Controls.Add($durLbl)
 
     $buttons += $btn
     $y += 65
 }
 
 $allBtn = New-Object Windows.Forms.Button
-$allBtn.Text = $allBtnText
+$allBtn.Text = "$allBtnText  (~7-11 Min insgesamt)"
 $allBtn.Location = New-Object Drawing.Point(15,($y+10))
 $allBtn.Size = New-Object Drawing.Size(910,50)
 $allBtn.BackColor = $C_GREEN
