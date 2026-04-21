@@ -518,17 +518,24 @@ function Invoke-ScanFile($file) {
     if (-not (Test-Path $path)) { Write-Log "FEHLT: $file" 'Red'; return }
     $statusLabel.Text = "Scan l${AE}uft: $file ..."
     Write-Log "Starte $file"
+    [System.Windows.Forms.Application]::DoEvents()
+
     try {
-        # Script als ScriptBlock laden - umgeht ExecutionPolicy komplett
+        # Script als ScriptBlock - umgeht ExecutionPolicy
         $content = Get-Content -Raw -LiteralPath $path -Encoding UTF8
         $sb = [ScriptBlock]::Create($content)
+        $counter = 0
         & $sb -OutputRoot $reportsRoot *>&1 | ForEach-Object {
             $line = $_.ToString()
             if ($line.Trim()) { Write-Log $line }
+            # Alle 5 Zeilen UI-Events verarbeiten damit GUI nicht einfriert
+            $counter++
+            if ($counter % 5 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
         }
         Write-Log "Fertig: $file" 'Cyan'
     } catch { Write-Log "Fehler: $_" 'Red' }
     $statusLabel.Text = $readyText
+    [System.Windows.Forms.Application]::DoEvents()
     Refresh-Reports
 }
 

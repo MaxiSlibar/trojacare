@@ -223,25 +223,35 @@ $services = Get-CimInstance Win32_Service |
 Save-Data -Name '07_services_auto' -Data $services
 
 # ---------- 6. Firewall-Regeln (aktiv, erlaubend) ----------
-Write-Host '[6/9] Firewall-Regeln...'
-$fw = Get-NetFirewallRule -Enabled True -Action Allow |
-    ForEach-Object {
-        $app  = $_ | Get-NetFirewallApplicationFilter
-        $port = $_ | Get-NetFirewallPortFilter
-        $addr = $_ | Get-NetFirewallAddressFilter
+Write-Host '[6/9] Firewall-Regeln (kann 1-3 Min dauern bei vielen Regeln)...'
+# Effiziente Variante: einmal alle Filter in Hash-Tables, dann lookup pro Regel
+# statt 3 Einzelabfragen pro Regel (war extrem langsam bei 500+ Regeln)
+try {
+    $appFilters  = @{}; Get-NetFirewallApplicationFilter -All -ErrorAction SilentlyContinue | ForEach-Object { $appFilters[$_.InstanceID]  = $_ }
+    $portFilters = @{}; Get-NetFirewallPortFilter        -All -ErrorAction SilentlyContinue | ForEach-Object { $portFilters[$_.InstanceID] = $_ }
+    $addrFilters = @{}; Get-NetFirewallAddressFilter     -All -ErrorAction SilentlyContinue | ForEach-Object { $addrFilters[$_.InstanceID] = $_ }
+
+    $fw = Get-NetFirewallRule -Enabled True -Action Allow -ErrorAction SilentlyContinue | ForEach-Object {
+        $id   = $_.InstanceID
+        $app  = $appFilters[$id]
+        $port = $portFilters[$id]
+        $addr = $addrFilters[$id]
         [pscustomobject]@{
             DisplayName = $_.DisplayName
             Direction   = $_.Direction
             Action      = $_.Action
             Profile     = $_.Profile
-            Program     = $app.Program
-            Protocol    = $port.Protocol
-            LocalPort   = ($port.LocalPort -join ',')
-            RemotePort  = ($port.RemotePort -join ',')
-            RemoteAddr  = ($addr.RemoteAddress -join ',')
+            Program     = if ($app)  { $app.Program }         else { $null }
+            Protocol    = if ($port) { $port.Protocol }       else { $null }
+            LocalPort   = if ($port) { ($port.LocalPort  -join ',') } else { $null }
+            RemotePort  = if ($port) { ($port.RemotePort -join ',') } else { $null }
+            RemoteAddr  = if ($addr) { ($addr.RemoteAddress -join ',') } else { $null }
         }
     }
-Save-Data -Name '08_firewall_rules' -Data $fw
+    Save-Data -Name '08_firewall_rules' -Data $fw
+} catch {
+    Write-Host "  Firewall-Analyse uebersprungen: $_" -ForegroundColor Yellow
+}
 
 # ---------- 7. DNS-Cache ----------
 Write-Host '[7/9] DNS-Cache...'
