@@ -1,0 +1,18 @@
+# Reports enthalten persoenliche Daten - nie committen
+reports/
+*.csv
+*.log
+
+# Windows
+Thumbs.db
+desktop.ini
+*.lnk
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Temp
+*.tmp
+*~
