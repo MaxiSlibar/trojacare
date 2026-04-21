@@ -134,7 +134,17 @@ foreach ($p in $wmiProcs) {
 # ---------- 5. Unsignierte DLLs in signierten Prozessen ----------
 Write-Host '[5] Sideloading (unsignierte DLLs)...'
 $sideloadRows = @()
-foreach ($p in (Get-Process | Where-Object { $_.Path -and (Test-Path $_.Path -ErrorAction SilentlyContinue) })) {
+# Problematische Prozess-Namen die beim Module-Enum BSODs ausloesen koennen
+$skipProcesses = @(
+    'vgc','vgk','Vanguard','vgtray',       # Riot Vanguard Anti-Cheat
+    'EasyAntiCheat','EasyAntiCheat_EOS',   # EAC
+    'BEService','BEDaisy','BattlEye',      # BattlEye
+    'FACEIT','kernelbridge','esportal',    # FACEIT/ESportal
+    'mhyprot','GenshinImpact',             # Genshin mhyprot-Treiber
+    'GameGuard','NPDLL','npggNT',          # nProtect GameGuard
+    'HSP','ESEA'                            # HSP / ESEA
+)
+foreach ($p in (Get-Process | Where-Object { $_.Path -and (Test-Path $_.Path -ErrorAction SilentlyContinue) -and $skipProcesses -notcontains $_.ProcessName })) {
     $exeSig = Get-AuthenticodeSignature -FilePath $p.Path -ErrorAction SilentlyContinue
     if (-not $exeSig -or $exeSig.Status -ne 'Valid') { continue }
     try { $modules = $p.Modules } catch { continue }
