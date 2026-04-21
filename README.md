@@ -1,80 +1,55 @@
 # Trojacare
 
-Windows-Forensik-Scanner-Suite zum Prüfen des eigenen PCs auf Malware,
-Rootkits, versteckte Persistenz und forensische Spuren.
+Windows-Forensik-Scanner-Suite — prüft deinen PC auf Malware, Rootkits,
+versteckte Persistenz und forensische Spuren.
 
-**Alles read-only, keine Änderungen am System. Keine Installation, keine
-externen Abhängigkeiten — nur Windows-PowerShell.**
+**Alles read-only. Keine Änderungen am System. Keine externen Abhängigkeiten.**
 
-## Warum
+![Screenshot](https://github.com/MaxiSlibar/trojacare/raw/main/docs/screenshot.png)
 
-Defender findet Alltags-Malware gut, aber:
+## Download — Zwei Versionen
 
-- **Fileless / Living-off-the-Land** (PowerShell, WMI, Scheduled Tasks)
-- **Persistenz** in AppInit_DLLs, IFEO, LSA-Packages, Winsock-LSP, COM-Hijacks
-- **Process Hollowing** und Namens-Imitation (svchost aus AppData)
-- **Man-in-the-Middle** via installierter Root-CAs
-- **BAM-Historie, Prefetch, USB-Plug-Events** — forensische Spurensuche
+### 🎯 Trojacare.exe (Standalone) — empfohlen für Endnutzer
 
-Trojacare schaut gezielt dort nach, **ohne zu blocken oder zu verändern.**
-Alle Scripts lassen sich selbst lesen und sind ca. 200–400 Zeilen.
+Ein einzelnes .exe. Doppelklick, UAC bestätigen, läuft. Keine anderen
+Dateien nötig. Scan-Scripts sind in der EXE eingebettet.
 
-## Schnellstart
+→ [Download Trojacare.exe](https://github.com/MaxiSlibar/trojacare/releases/latest)
 
-PowerShell **als Administrator** öffnen:
+### ⚙️ Trojacare-Lite.exe + Scripts (Modular) — für Entwickler/Auditoren
 
-```powershell
-cd <Pfad zu trojacare>
-powershell -ExecutionPolicy Bypass -File .\trojacare.ps1
-```
+EXE ist nur die GUI, die Scan-Scripts liegen daneben als `.ps1`. Du kannst
+die Scripts selbst lesen, editieren, erweitern — ohne neu zu kompilieren.
 
-Menü auswählen. Ergebnisse landen in `reports\<zeitstempel>\`.
-Zuerst `SUMMARY.txt` lesen.
+→ [Download Trojacare-Lite.zip](https://github.com/MaxiSlibar/trojacare/releases/latest)
 
-## Hinweis zu Windows Defender / AMSI
+## Was wird geprüft
 
-Die Scripts erwähnen Schlüsselwörter wie `Mimikatz`, `Invoke-Expression`,
-`EncodedCommand` — zur **Erkennung** in PowerShell-History. Defender/AMSI
-kann das als verdächtig markieren und blockieren.
+### 1. Netzwerk-Scan (2–15 Min)
+Aktive TCP/UDP-Verbindungen mit Prozess + Pfad + Signatur, lauschende
+Ports, Autostart-Einträge, automatisch startende Dienste, Firewall-Regeln,
+DNS-Cache, Hosts-Datei.
 
-Workaround (nur während des Scans):
-
-```powershell
-Add-MpPreference -ExclusionPath (Get-Location).Path
-# ... Scan laufen lassen ...
-Remove-MpPreference -ExclusionPath (Get-Location).Path
-```
-
-## Die sechs Scans
-
-### `Scan-Connections.ps1` — Netzwerk-Grundlagen
-TCP/UDP-Verbindungen mit Prozess + Pfad + Signatur, lauschende Ports,
-Autostart-Einträge, automatisch startende Dienste, Firewall-Regeln,
-DNS-Cache, Hosts-Datei. Basis-Inventur.
-
-### `Scan-Stealth.ps1` — Tarnung und Persistenz
+### 2. Stealth-Scan (5–20 Min)
 - **Prozesslisten-Diff** (WMI vs. Get-Process vs. tasklist) → Rootkits
 - **Namens-Imitation** (svchost aus User-Pfad, Unicode-Tricks)
 - **Parent-Anomalien** (Office → PowerShell, lsass-Parent ≠ wininit)
-- **Fileless** (laufender Prozess ohne Image auf Disk)
+- **Fileless-Prozesse** (laufend ohne Image auf Disk)
 - **DLL-Sideloading** (unsignierte DLLs in signierten Prozessen)
 - **WMI Event-Subscriptions** (stiller Persistenzort)
-- **Encoded PowerShell**, `rundll32` mit User-Pfad-DLLs
-- **COM-Hijacking** (HKCU InprocServer32)
-- **Alternate Data Streams** in Startup-Ordnern
-- **Orphan-Verbindungen** (Netztraffic ohne zuordenbaren Prozess)
+- **Encoded PowerShell**, COM-Hijacking, Alternate Data Streams
 
-### `Scan-Forensics.ps1` — Nutzungs-Historie (30 Tage)
-- **Boot/Shutdown/Sleep/Wake** aus System-Eventlog
-- **Logon/Logoff/Lock** mit User, LogonType, Source-IP (Security-Log)
-- **Datenträger-Plugs**: jeder je angesteckte Datenträger mit Hersteller,
-  Modell, **Seriennummer**, Größe (Partition/Diagnostic Log)
-- **USB-Historie** aus Registry (auch entfernte Geräte)
+### 3. Forensics (3–10 Min)
+- **Boot/Shutdown/Sleep/Wake** aus System-Eventlog (30 Tage)
+- **Logon/Logoff/Lock** mit User, LogonType, Source-IP
+- **Datenträger-Plugs**: jeder je angesteckte Datenträger mit
+  Hersteller, Modell, Seriennummer, Größe
+- **USB-Registry-Historie** (auch entfernte Geräte)
 - **Prefetch**: welche EXEs wann liefen
-- **Recent Files, JumpLists, RecentDocs, UserAssist** (ROT13-decoded)
+- **Recent Files, JumpLists, UserAssist** (ROT13-decoded)
 
-### `Scan-Deep.ps1` — Tiefen-Persistenz
-- **BAM** (Background Activity Moderator)
+### 4. Deep-Scan (5–20 Min)
+- **BAM** (Background Activity Moderator) - was wirklich lief
 - **AppInit_DLLs**, **IFEO Debugger**, **Winlogon Shell/Userinit**
 - **LSA Security/Authentication Packages** (Credential-Theft-Risiko)
 - **Winsock LSP** Provider
@@ -84,73 +59,107 @@ DNS-Cache, Hosts-Datei. Basis-Inventur.
 - **Browser-Extensions** (Chrome/Edge/Opera/Brave)
 - **Named Pipes**, **Print Monitors**, **Active Setup StubPath**
 
-### `Scan-Window.ps1` — Zeitfenster-Forensik
-Für konkrete Vorfälle: enges Zeitfenster angeben, sieht alles darin:
-Logons, gelaufene Programme, USB-Plugs, geänderte Dateien, Netzwerk-
-Events. Beispiel: "Zwischen 11:09 und 11:14 war jemand am PC — was hat
-er gemacht?"
+## GUI
+
+Zwei Tabs:
+- **Scans** — Buttons mit Dauer-Angabe + Live-Log
+- **Berichte** — Report-Viewer direkt in der App:
+  - Dropdown mit allen bisherigen Scans (Datum)
+  - Zusammenfassung mit Severity-Farben (CRIT/HIGH/MED)
+  - Funde als sortierbare Tabelle
+  - Alle Dateien mit Inhalts-Vorschau
+
+## Eigene Builds
+
+### Voraussetzungen
+- Windows 10/11
+- PowerShell 5.1+
+- Admin-Rechte
+
+### Beide EXEs bauen
 
 ```powershell
-.\Scan-Window.ps1 -Start '2026-04-21 11:09:00' -End '2026-04-21 11:14:00'
+git clone https://github.com/MaxiSlibar/trojacare.git
+cd trojacare
+powershell -ExecutionPolicy Bypass -File .\build-all.ps1
 ```
 
-### `Monitor-Network.ps1` — Beacon-Fang
-Pollt TCP-Verbindungen über Stunden. Malware die alle 2-5 Min zu einem
-C2-Server callt, landet oben in der Häufigkeitsliste.
+Das erzeugt `Trojacare.exe` (Standalone) **und** `Trojacare-Lite.exe`
+(Modular). Erstmaliger Build installiert automatisch `ps2exe`-Modul.
+
+### Einzeln
 
 ```powershell
-.\Monitor-Network.ps1 -DurationMinutes 60
+.\build-standalone.ps1   # → Trojacare.exe (alle Scripts eingebettet)
+.\build.ps1              # → Trojacare-Lite.exe (braucht Scripts daneben)
+```
+
+### Ohne Build starten
+```powershell
+powershell -ExecutionPolicy Bypass -File .\trojacare.ps1
 ```
 
 ## Was Trojacare NICHT kann
 
 - **Kernel-Rootkits** die sich vor allen Windows-APIs verstecken
-- **UEFI-Implants** (sitzen im Mainboard-Flash)
-- **Hypervisor-Rootkits** (Windows als Gast sieht den Hypervisor nicht)
-- **Staatstrojaner** mit gestohlenen gültigen Signaturzertifikaten erscheinen
-  als `Valid` signiert
-- **Live-RAM-Analyse** (braucht externe Tools wie Volatility)
+- **UEFI-Implants** (Mainboard-Flash)
+- **Hypervisor-Rootkits** (Windows als Gast sieht Hypervisor nicht)
+- **Staatstrojaner** mit gestohlenen gültigen Signaturen erscheinen als Valid
 
-Für diese Klassen: Offline-Scan von sauberem USB-Medium
-(Kaspersky Rescue Disk, ESET SysRescue, Tails mit `chipsec`).
+Für diese Klassen: Offline-Scan von sauberem USB-Medium (Kaspersky Rescue
+Disk, ESET SysRescue, Tails mit `chipsec`).
 
-## Wie interpretieren
+## Severity-Level
 
-Jedes Finding hat eine Severity:
+- **CRIT** — fast sicher Malware (AppCertDll, IFEO auf System-EXEs)
+- **HIGH** — starkes Warnsignal (Sideloading, unbekannte Root-CA)
+- **MED** — auffällig, oft False Positive (COM-Hijack-Kandidat)
+- **LOW** — zur Info (User-Pfad-EXE im BAM)
 
-- **CRIT** — fast sicher Malware. AppCertDll, IFEO-Hijack auf System-EXEs,
-  Winlogon-Shell manipuliert, Encoded-PowerShell in BAM.
-- **HIGH** — starkes Warnsignal. Sideloading, unbekannte Root-CA,
-  Fileless-Prozess, WMI-Subscription.
-- **MED** — auffällig, oft False Positive. COM-Hijack-Kandidat,
-  LOLBin-Scheduled-Task, nicht-MS-Task mit rundll32.
-- **LOW** — zur Info. User-Pfad-EXE im BAM, Script-Datei in AppData.
-
-False Positives sind häufig bei harmlosen Tools:
+**Häufige False Positives:**
 - Gaming-Software (Razer, Logitech, Oculus) legt lokale Root-CAs an
 - Steam/Epic/Riot laufen aus User-Pfad
-- Office-Installer nutzen `rundll32`
+- Microsoft Defender erscheint als "Unknown Signature" (Prozess
+  schützt sich selbst vor Lese-Zugriffen)
 
-Immer den konkreten Pfad + Signatur anschauen bevor Panik.
+Immer konkrete Pfad + Signatur anschauen bevor Panik.
+
+## Hinweise
+
+### SmartScreen-Warnung
+Die EXE ist nicht code-signiert. Windows warnt beim ersten Start:
+**"Weitere Informationen" → "Trotzdem ausführen"**.
+
+### Windows Defender / AMSI
+Die Scripts erwähnen Schlüsselwörter wie `Mimikatz` (zur Erkennung in
+PS-History). Die EXE setzt automatisch eine Defender-Exclusion für ihren
+Arbeitsordner während des Laufs und entfernt sie beim Beenden.
+
+### Reports
+Landen in `trojacare-reports\` neben der EXE. Pro Scan ein Unterordner
+mit Zeitstempel. CSV + TXT + SUMMARY.txt.
 
 ## Lizenz
 
-MIT. Nutzung auf eigene Gefahr. Keine Haftung für Schäden.
+MIT. Nutzung auf eigene Gefahr. Keine Haftung.
+
+## Autor
+
+**MaxiSlibar** — https://github.com/MaxiSlibar
 
 ## Contributing
 
 PRs willkommen für:
 - Weitere Persistenz-Vektoren
 - Bessere Whitelists (weniger False Positives)
-- Korrigierter/erweiterter Deutsch-Text / Englisch-Übersetzung
-- Parser für AmCache, SRUM, MFT (Offline-Forensik)
+- Deutsch-Englisch-Übersetzung
+- Parser für AmCache, SRUM, MFT
 
 ## Verwandte Tools
 
 Wenn Trojacare nicht reicht:
-
-- **Sysinternals** (Autoruns, Process Explorer, Process Monitor, TCPView)
-- **AmCacheParser** / **MFTECmd** (Eric Zimmerman Tools)
+- **Sysinternals** (Autoruns, Process Explorer, TCPView)
+- **Eric Zimmerman Tools** (AmCacheParser, MFTECmd)
 - **KAPE** (Live-Response-Sammelwerkzeug)
 - **Volatility** (RAM-Analyse)
-- **Loki** / **Thor** (IOC-Scanner)
+- **Loki / Thor** (IOC-Scanner)

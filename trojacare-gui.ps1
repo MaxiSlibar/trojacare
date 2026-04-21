@@ -1,157 +1,486 @@
 <#
 .SYNOPSIS
-  Trojacare GUI - Punkt-und-Klick-Forensik-Scanner fuer Nicht-Techniker.
-.DESCRIPTION
-  WinForms GUI. Startet die Scan-Scripts per Knopfdruck, elevatet sich selbst,
-  managed Defender-Exclusion automatisch, oeffnet Report-Ordner am Ende.
+  Trojacare GUI (Modular-Version) - braucht Scan-*.ps1 im gleichen Ordner.
+  Fuer Standalone-Version siehe build-standalone.ps1.
 #>
 
-# --- Self-elevate ---
+# Unicode-Zeichen zur Laufzeit konstruieren (ASCII-safe fuer ps2exe)
+$UE = [char]0x00FC  # u-Umlaut
+$AE = [char]0x00E4  # a-Umlaut
+$OE = [char]0x00F6  # o-Umlaut
+$SZ = [char]0x00DF  # scharfes s
+$ARROW = [char]0x25B6 + ' '
+$REFRESH = [char]0x21BB + ' '
+
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
+
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue } catch {}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
-    Start-Process powershell -Verb RunAs -ArgumentList $args
+    Start-Process powershell -Verb RunAs -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
     exit
 }
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+[System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
-$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+# Script-Ordner finden (Modular: Scripts liegen daneben)
+$scriptDir = $null
+try { $scriptDir = Split-Path -Parent ([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName) } catch {}
+if (-not $scriptDir -and $PSScriptRoot) { $scriptDir = $PSScriptRoot }
+if (-not $scriptDir -and $MyInvocation.MyCommand.Path) { $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $scriptDir) { $scriptDir = [Environment]::GetFolderPath('Desktop') }
 
-# --- Scan-Definitionen ---
+$reportsRoot = Join-Path $scriptDir 'trojacare-reports'
+if (-not (Test-Path $reportsRoot)) { New-Item -ItemType Directory -Path $reportsRoot -Force | Out-Null }
+
+$subtitleText = "Windows-Forensik-Scanner $([char]0x2022) pr${UE}ft deinen PC auf Malware und Spuren"
+$readyText = "Bereit. W${AE}hle einen Scan."
+$allBtnText = "${ARROW} ALLE Scans nacheinander starten"
+$refreshText = "${REFRESH} Aktualisieren"
+$folderText = "Report-Ordner ${OE}ffnen"
+
 $scans = @(
-    @{ Name='1. Netzwerk-Scan';      File='Scan-Connections.ps1'; Info='Wer verbindet sich wohin? Autostart-Programme, lauschende Ports, DNS-Cache.' }
-    @{ Name='2. Stealth-Scan';       File='Scan-Stealth.ps1';     Info='Versteckte Malware, Rootkit-Hinweise, WMI-Persistenz, DLL-Injektion.' }
-    @{ Name='3. Forensics (30 Tage)';File='Scan-Forensics.ps1';   Info='Wann war der PC an? Wer war eingeloggt? Welche USB-Sticks wurden gesteckt?' }
-    @{ Name='4. Deep-Scan';          File='Scan-Deep.ps1';        Info='Tiefe Persistenz-Checks: AppInit-DLLs, IFEO, LSA, Root-Zertifikate (MitM-Check).' }
+    @{ Name='Netzwerk-Scan';          File='Scan-Connections.ps1'; Info='Verbindungen, Ports, Autostart, DNS-Cache';       Duration='2-15 Min' }
+    @{ Name='Stealth-Scan';           File='Scan-Stealth.ps1';     Info='Rootkit-Hinweise, WMI-Persistenz, Sideloading';    Duration='5-20 Min' }
+    @{ Name="Forensics (30 Tage)";    File='Scan-Forensics.ps1';   Info='PC an/aus, Logons, USB-Historie, Prefetch';        Duration='3-10 Min' }
+    @{ Name='Deep-Scan';              File='Scan-Deep.ps1';        Info='AppInit, IFEO, LSA, Root-Zertifikate';             Duration='5-20 Min' }
 )
 
-# --- Form ---
-$form              = New-Object Windows.Forms.Form
-$form.Text         = 'Trojacare - Forensik-Scanner'
-$form.Size         = New-Object Drawing.Size(720,580)
-$form.StartPosition= 'CenterScreen'
-$form.BackColor    = [Drawing.Color]::FromArgb(30,30,35)
-$form.ForeColor    = [Drawing.Color]::White
-$form.Font         = New-Object Drawing.Font('Segoe UI',10)
-$form.MinimumSize  = $form.Size
+$C_BG      = [Drawing.Color]::FromArgb(28,30,38)
+$C_PANEL   = [Drawing.Color]::FromArgb(38,42,52)
+$C_PANEL2  = [Drawing.Color]::FromArgb(45,50,62)
+$C_ACCENT  = [Drawing.Color]::FromArgb(100,180,255)
+$C_GREEN   = [Drawing.Color]::FromArgb(50,160,90)
+$C_TEXT    = [Drawing.Color]::FromArgb(235,235,240)
+$C_MUTED   = [Drawing.Color]::FromArgb(150,155,165)
+$C_BORDER  = [Drawing.Color]::FromArgb(70,75,90)
 
-# --- Header ---
-$header          = New-Object Windows.Forms.Label
-$header.Text     = 'TROJACARE'
-$header.Font     = New-Object Drawing.Font('Segoe UI',20,[Drawing.FontStyle]::Bold)
-$header.ForeColor= [Drawing.Color]::FromArgb(100,200,255)
-$header.Location = New-Object Drawing.Point(20,15)
-$header.Size     = New-Object Drawing.Size(400,40)
-$form.Controls.Add($header)
+$form = New-Object Windows.Forms.Form
+$form.Text = 'Trojacare (Lite)'
+$form.Size = New-Object Drawing.Size(1000,740)
+$form.StartPosition = 'CenterScreen'
+$form.BackColor = $C_BG
+$form.ForeColor = $C_TEXT
+$form.Font = New-Object Drawing.Font('Segoe UI',10)
+$form.MinimumSize = New-Object Drawing.Size(900,620)
 
-$subtitle          = New-Object Windows.Forms.Label
-$subtitle.Text     = 'Prueft deinen Windows-PC auf Malware und forensische Spuren'
-$subtitle.Location = New-Object Drawing.Point(22,55)
-$subtitle.Size     = New-Object Drawing.Size(680,20)
-$subtitle.ForeColor= [Drawing.Color]::Gray
-$form.Controls.Add($subtitle)
+$headerPanel = New-Object Windows.Forms.Panel
+$headerPanel.Location = New-Object Drawing.Point(0,0)
+$headerPanel.Size = New-Object Drawing.Size(1000,90)
+$headerPanel.BackColor = [Drawing.Color]::FromArgb(22,25,32)
+$headerPanel.Anchor = 'Top,Left,Right'
+$form.Controls.Add($headerPanel)
 
-# --- Scan-Buttons mit Info ---
-$y = 95
-$buttons = @()
+$header = New-Object Windows.Forms.Label
+$header.Text = 'TROJACARE'
+$header.Font = New-Object Drawing.Font('Segoe UI Semibold',24,[Drawing.FontStyle]::Bold)
+$header.ForeColor = $C_ACCENT
+$header.Location = New-Object Drawing.Point(25,15)
+$header.Size = New-Object Drawing.Size(400,40)
+$header.BackColor = [Drawing.Color]::Transparent
+$headerPanel.Controls.Add($header)
+
+$subtitle = New-Object Windows.Forms.Label
+$subtitle.Text = $subtitleText
+$subtitle.Location = New-Object Drawing.Point(27,55)
+$subtitle.Size = New-Object Drawing.Size(700,22)
+$subtitle.ForeColor = $C_MUTED
+$subtitle.BackColor = [Drawing.Color]::Transparent
+$subtitle.Font = New-Object Drawing.Font('Segoe UI',10)
+$headerPanel.Controls.Add($subtitle)
+
+$authorLabel = New-Object Windows.Forms.Label
+$authorLabel.Text = "by MaxiSlibar $([char]0x2022) v1.0 Lite $([char]0x2022) MIT"
+$authorLabel.Location = New-Object Drawing.Point(760,60)
+$authorLabel.Size = New-Object Drawing.Size(220,18)
+$authorLabel.ForeColor = $C_MUTED
+$authorLabel.BackColor = [Drawing.Color]::Transparent
+$authorLabel.TextAlign = 'MiddleRight'
+$authorLabel.Anchor = 'Top,Right'
+$authorLabel.Font = New-Object Drawing.Font('Segoe UI',8)
+$headerPanel.Controls.Add($authorLabel)
+
+$tabs = New-Object Windows.Forms.TabControl
+$tabs.Location = New-Object Drawing.Point(15,100)
+$tabs.Size = New-Object Drawing.Size(955,595)
+$tabs.Anchor = 'Top,Bottom,Left,Right'
+$tabs.Font = New-Object Drawing.Font('Segoe UI',10)
+$tabs.Padding = New-Object Drawing.Point(15,6)
+$form.Controls.Add($tabs)
+
+$tabScan = New-Object Windows.Forms.TabPage
+$tabScan.Text = 'Scans'
+$tabScan.BackColor = $C_PANEL
+$tabScan.Padding = New-Object Windows.Forms.Padding(10)
+$tabs.TabPages.Add($tabScan)
+
+$y = 20; $buttons = @()
 foreach ($s in $scans) {
-    $btn              = New-Object Windows.Forms.Button
-    $btn.Text         = $s.Name
-    $btn.Location     = New-Object Drawing.Point(20,$y)
-    $btn.Size         = New-Object Drawing.Size(220,35)
-    $btn.BackColor    = [Drawing.Color]::FromArgb(45,45,55)
-    $btn.ForeColor    = [Drawing.Color]::White
-    $btn.FlatStyle    = 'Flat'
-    $btn.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(80,80,90)
-    $btn.TextAlign    = 'MiddleLeft'
-    $btn.Padding      = New-Object Windows.Forms.Padding(10,0,0,0)
-    $btn.Tag          = $s.File
+    $card = New-Object Windows.Forms.Panel
+    $card.Location = New-Object Drawing.Point(15,$y)
+    $card.Size = New-Object Drawing.Size(910,55)
+    $card.BackColor = $C_PANEL2
+    $card.Anchor = 'Top,Left,Right'
+    $tabScan.Controls.Add($card)
 
-    $lbl            = New-Object Windows.Forms.Label
-    $lbl.Text       = $s.Info
-    $lbl.Location   = New-Object Drawing.Point(250,($y+8))
-    $lbl.Size       = New-Object Drawing.Size(440,40)
-    $lbl.ForeColor  = [Drawing.Color]::LightGray
+    $btn = New-Object Windows.Forms.Button
+    $btn.Text = $s.Name
+    $btn.Location = New-Object Drawing.Point(0,0)
+    $btn.Size = New-Object Drawing.Size(250,55)
+    $btn.BackColor = [Drawing.Color]::FromArgb(55,65,85)
+    $btn.ForeColor = $C_TEXT
+    $btn.FlatStyle = 'Flat'
+    $btn.FlatAppearance.BorderSize = 0
+    $btn.FlatAppearance.MouseOverBackColor = [Drawing.Color]::FromArgb(70,90,120)
+    $btn.Font = New-Object Drawing.Font('Segoe UI',11,[Drawing.FontStyle]::Bold)
+    $btn.TextAlign = 'MiddleCenter'
+    $btn.Cursor = 'Hand'
+    $btn.Tag = $s.File
+    $card.Controls.Add($btn)
 
-    $form.Controls.Add($btn)
-    $form.Controls.Add($lbl)
+    $lbl = New-Object Windows.Forms.Label
+    $lbl.Text = $s.Info
+    $lbl.Location = New-Object Drawing.Point(265,10)
+    $lbl.Size = New-Object Drawing.Size(530,20)
+    $lbl.ForeColor = $C_MUTED
+    $lbl.Font = New-Object Drawing.Font('Segoe UI',10)
+    $card.Controls.Add($lbl)
+
+    $durLbl = New-Object Windows.Forms.Label
+    $durLbl.Text = "Dauer: $($s.Duration)"
+    $durLbl.Location = New-Object Drawing.Point(265,30)
+    $durLbl.Size = New-Object Drawing.Size(300,18)
+    $durLbl.ForeColor = [Drawing.Color]::FromArgb(120,180,220)
+    $durLbl.Font = New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Italic)
+    $card.Controls.Add($durLbl)
+
     $buttons += $btn
-    $y += 50
+    $y += 65
 }
 
-# --- Alle-Scannen-Button ---
 $allBtn = New-Object Windows.Forms.Button
-$allBtn.Text      = 'ALLE Scans nacheinander starten'
-$allBtn.Location  = New-Object Drawing.Point(20,($y+10))
-$allBtn.Size      = New-Object Drawing.Size(670,40)
-$allBtn.BackColor = [Drawing.Color]::FromArgb(30,120,60)
+$allBtn.Text = "$allBtnText  (15-60 Min je nach PC)"
+$allBtn.Location = New-Object Drawing.Point(15,($y+10))
+$allBtn.Size = New-Object Drawing.Size(910,50)
+$allBtn.BackColor = $C_GREEN
 $allBtn.ForeColor = [Drawing.Color]::White
 $allBtn.FlatStyle = 'Flat'
-$allBtn.Font      = New-Object Drawing.Font('Segoe UI',11,[Drawing.FontStyle]::Bold)
-$form.Controls.Add($allBtn)
+$allBtn.FlatAppearance.BorderSize = 0
+$allBtn.FlatAppearance.MouseOverBackColor = [Drawing.Color]::FromArgb(65,180,105)
+$allBtn.Font = New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold)
+$allBtn.Cursor = 'Hand'
+$allBtn.Anchor = 'Top,Left,Right'
+$tabScan.Controls.Add($allBtn)
 
-# --- Output-Box ---
-$output              = New-Object Windows.Forms.TextBox
-$output.Location     = New-Object Drawing.Point(20,($y+60))
-$output.Size         = New-Object Drawing.Size(670,200)
-$output.Multiline    = $true
-$output.ScrollBars   = 'Vertical'
-$output.BackColor    = [Drawing.Color]::FromArgb(15,15,20)
-$output.ForeColor    = [Drawing.Color]::LightGreen
-$output.Font         = New-Object Drawing.Font('Consolas',9)
-$output.ReadOnly     = $true
-$output.Anchor       = 'Top,Bottom,Left,Right'
-$form.Controls.Add($output)
+$logLabel = New-Object Windows.Forms.Label
+$logLabel.Text = 'Live-Log'
+$logLabel.Location = New-Object Drawing.Point(15,($y+75))
+$logLabel.Size = New-Object Drawing.Size(200,18)
+$logLabel.ForeColor = $C_MUTED
+$logLabel.Font = New-Object Drawing.Font('Segoe UI',9)
+$tabScan.Controls.Add($logLabel)
 
-# --- Status + Report-Button ---
-$statusLabel          = New-Object Windows.Forms.Label
-$statusLabel.Text     = 'Bereit. Waehle einen Scan.'
-$statusLabel.Location = New-Object Drawing.Point(20,($y+275))
-$statusLabel.Size     = New-Object Drawing.Size(450,20)
-$statusLabel.ForeColor= [Drawing.Color]::Gray
-$statusLabel.Anchor   = 'Bottom,Left'
-$form.Controls.Add($statusLabel)
+$output = New-Object Windows.Forms.RichTextBox
+$output.Location = New-Object Drawing.Point(15,($y+95))
+$output.Size = New-Object Drawing.Size(910,200)
+$output.ScrollBars = 'Vertical'
+$output.BackColor = [Drawing.Color]::FromArgb(15,18,24)
+$output.ForeColor = [Drawing.Color]::FromArgb(120,220,140)
+$output.Font = New-Object Drawing.Font('Consolas',9)
+$output.ReadOnly = $true
+$output.Anchor = 'Top,Bottom,Left,Right'
+$output.DetectUrls = $false
+$output.BorderStyle = 'FixedSingle'
+$tabScan.Controls.Add($output)
 
-$openBtn            = New-Object Windows.Forms.Button
-$openBtn.Text       = 'Report-Ordner oeffnen'
-$openBtn.Location   = New-Object Drawing.Point(480,($y+270))
-$openBtn.Size       = New-Object Drawing.Size(210,30)
-$openBtn.BackColor  = [Drawing.Color]::FromArgb(45,45,55)
-$openBtn.ForeColor  = [Drawing.Color]::White
-$openBtn.FlatStyle  = 'Flat'
-$openBtn.Anchor     = 'Bottom,Right'
-$form.Controls.Add($openBtn)
+$statusLabel = New-Object Windows.Forms.Label
+$statusLabel.Text = $readyText
+$statusLabel.Location = New-Object Drawing.Point(15,($y+305))
+$statusLabel.Size = New-Object Drawing.Size(600,22)
+$statusLabel.ForeColor = $C_MUTED
+$statusLabel.Anchor = 'Bottom,Left'
+$tabScan.Controls.Add($statusLabel)
 
-# --- Logik ---
+$tabReport = New-Object Windows.Forms.TabPage
+$tabReport.Text = 'Berichte'
+$tabReport.BackColor = $C_PANEL
+$tabReport.Padding = New-Object Windows.Forms.Padding(10)
+$tabs.TabPages.Add($tabReport)
+
+$reportLabel = New-Object Windows.Forms.Label
+$reportLabel.Text = "Bericht ausw${AE}hlen:"
+$reportLabel.Location = New-Object Drawing.Point(15,15)
+$reportLabel.Size = New-Object Drawing.Size(200,20)
+$reportLabel.ForeColor = $C_TEXT
+$reportLabel.Font = New-Object Drawing.Font('Segoe UI',10,[Drawing.FontStyle]::Bold)
+$tabReport.Controls.Add($reportLabel)
+
+$reportCombo = New-Object Windows.Forms.ComboBox
+$reportCombo.Location = New-Object Drawing.Point(15,38)
+$reportCombo.Size = New-Object Drawing.Size(640,26)
+$reportCombo.DropDownStyle = 'DropDownList'
+$reportCombo.BackColor = $C_PANEL2
+$reportCombo.ForeColor = $C_TEXT
+$reportCombo.FlatStyle = 'Flat'
+$reportCombo.Font = New-Object Drawing.Font('Segoe UI',10)
+$tabReport.Controls.Add($reportCombo)
+
+$refreshBtn = New-Object Windows.Forms.Button
+$refreshBtn.Text = $refreshText
+$refreshBtn.Location = New-Object Drawing.Point(665,37)
+$refreshBtn.Size = New-Object Drawing.Size(130,28)
+$refreshBtn.BackColor = $C_PANEL2
+$refreshBtn.ForeColor = $C_TEXT
+$refreshBtn.FlatStyle = 'Flat'
+$refreshBtn.FlatAppearance.BorderColor = $C_BORDER
+$refreshBtn.Cursor = 'Hand'
+$tabReport.Controls.Add($refreshBtn)
+
+$openFolderBtn = New-Object Windows.Forms.Button
+$openFolderBtn.Text = $folderText
+$openFolderBtn.Location = New-Object Drawing.Point(800,37)
+$openFolderBtn.Size = New-Object Drawing.Size(140,28)
+$openFolderBtn.BackColor = $C_PANEL2
+$openFolderBtn.ForeColor = $C_TEXT
+$openFolderBtn.FlatStyle = 'Flat'
+$openFolderBtn.FlatAppearance.BorderColor = $C_BORDER
+$openFolderBtn.Anchor = 'Top,Right'
+$openFolderBtn.Cursor = 'Hand'
+$tabReport.Controls.Add($openFolderBtn)
+
+$reportTabs = New-Object Windows.Forms.TabControl
+$reportTabs.Location = New-Object Drawing.Point(15,78)
+$reportTabs.Size = New-Object Drawing.Size(925,485)
+$reportTabs.Anchor = 'Top,Bottom,Left,Right'
+$tabReport.Controls.Add($reportTabs)
+
+$summaryTab = New-Object Windows.Forms.TabPage
+$summaryTab.Text = 'Zusammenfassung'
+$summaryTab.BackColor = $C_PANEL
+$reportTabs.TabPages.Add($summaryTab)
+
+$summaryView = New-Object Windows.Forms.RichTextBox
+$summaryView.Dock = 'Fill'
+$summaryView.BackColor = [Drawing.Color]::FromArgb(20,22,28)
+$summaryView.ForeColor = $C_TEXT
+$summaryView.Font = New-Object Drawing.Font('Consolas',10)
+$summaryView.ReadOnly = $true
+$summaryView.DetectUrls = $false
+$summaryView.BorderStyle = 'None'
+$summaryTab.Controls.Add($summaryView)
+
+$findingsTab = New-Object Windows.Forms.TabPage
+$findingsTab.Text = 'Funde'
+$findingsTab.BackColor = $C_PANEL
+$reportTabs.TabPages.Add($findingsTab)
+
+$findingsGrid = New-Object Windows.Forms.DataGridView
+$findingsGrid.Dock = 'Fill'
+$findingsGrid.BackgroundColor = [Drawing.Color]::FromArgb(20,22,28)
+$findingsGrid.ForeColor = $C_TEXT
+$findingsGrid.GridColor = $C_BORDER
+$findingsGrid.BorderStyle = 'None'
+$findingsGrid.AlternatingRowsDefaultCellStyle.BackColor = [Drawing.Color]::FromArgb(28,32,40)
+$findingsGrid.DefaultCellStyle.BackColor = [Drawing.Color]::FromArgb(22,25,32)
+$findingsGrid.DefaultCellStyle.ForeColor = $C_TEXT
+$findingsGrid.DefaultCellStyle.SelectionBackColor = [Drawing.Color]::FromArgb(60,120,180)
+$findingsGrid.DefaultCellStyle.SelectionForeColor = [Drawing.Color]::White
+$findingsGrid.ColumnHeadersDefaultCellStyle.BackColor = [Drawing.Color]::FromArgb(50,55,70)
+$findingsGrid.ColumnHeadersDefaultCellStyle.ForeColor = $C_TEXT
+$findingsGrid.ColumnHeadersDefaultCellStyle.Font = New-Object Drawing.Font('Segoe UI',10,[Drawing.FontStyle]::Bold)
+$findingsGrid.ColumnHeadersHeight = 32
+$findingsGrid.RowTemplate.Height = 26
+$findingsGrid.EnableHeadersVisualStyles = $false
+$findingsGrid.ReadOnly = $true
+$findingsGrid.AutoSizeColumnsMode = 'Fill'
+$findingsGrid.AllowUserToAddRows = $false
+$findingsGrid.RowHeadersVisible = $false
+$findingsGrid.Font = New-Object Drawing.Font('Segoe UI',9)
+$findingsTab.Controls.Add($findingsGrid)
+
+$filesTab = New-Object Windows.Forms.TabPage
+$filesTab.Text = 'Alle Dateien'
+$filesTab.BackColor = $C_PANEL
+$reportTabs.TabPages.Add($filesTab)
+
+$split = New-Object Windows.Forms.SplitContainer
+$split.Dock = 'Fill'
+$split.Orientation = 'Horizontal'
+$split.SplitterDistance = 150
+$split.BackColor = $C_PANEL
+$split.Panel1.BackColor = [Drawing.Color]::FromArgb(20,22,28)
+$split.Panel2.BackColor = [Drawing.Color]::FromArgb(20,22,28)
+$filesTab.Controls.Add($split)
+
+$filesList = New-Object Windows.Forms.ListBox
+$filesList.Dock = 'Fill'
+$filesList.BackColor = [Drawing.Color]::FromArgb(20,22,28)
+$filesList.ForeColor = $C_TEXT
+$filesList.Font = New-Object Drawing.Font('Consolas',9)
+$filesList.BorderStyle = 'None'
+$split.Panel1.Controls.Add($filesList)
+
+$fileContent = New-Object Windows.Forms.RichTextBox
+$fileContent.Dock = 'Fill'
+$fileContent.BackColor = [Drawing.Color]::FromArgb(20,22,28)
+$fileContent.ForeColor = $C_TEXT
+$fileContent.Font = New-Object Drawing.Font('Consolas',9)
+$fileContent.ReadOnly = $true
+$fileContent.DetectUrls = $false
+$fileContent.WordWrap = $false
+$fileContent.ScrollBars = 'Both'
+$fileContent.BorderStyle = 'None'
+$split.Panel2.Controls.Add($fileContent)
+
 function Write-Log($msg, $color='LightGreen') {
-    $output.SelectionColor = [Drawing.Color]::$color
+    $output.SelectionStart = $output.TextLength
+    $output.SelectionLength = 0
+    try { $output.SelectionColor = [Drawing.Color]::$color } catch {}
     $output.AppendText("$(Get-Date -f 'HH:mm:ss')  $msg`r`n")
+    $output.ScrollToCaret()
     [System.Windows.Forms.Application]::DoEvents()
 }
+
+function Refresh-Reports {
+    $reportCombo.Items.Clear()
+    $reportCombo.Tag = @()
+    if (-not (Test-Path $reportsRoot)) { return }
+    $dirs = Get-ChildItem $reportsRoot -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $paths = @()
+    foreach ($d in $dirs) {
+        $label = '{0}   -   {1}' -f $d.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $d.Name
+        [void]$reportCombo.Items.Add($label)
+        $paths += $d.FullName
+    }
+    $reportCombo.Tag = $paths
+    if ($reportCombo.Items.Count -gt 0) { $reportCombo.SelectedIndex = 0 }
+}
+
+function Load-Report($path) {
+    $summaryView.Clear()
+    $summaryFile = Join-Path $path 'SUMMARY.txt'
+    if (Test-Path $summaryFile) {
+        $content = Get-Content $summaryFile -Raw -Encoding UTF8
+        $summaryView.Text = $content
+        $lines = $content -split "`n"
+        $offset = 0
+        foreach ($line in $lines) {
+            $len = $line.Length + 1
+            if ($line -match '\bCRIT\b') {
+                $summaryView.Select($offset, $len)
+                $summaryView.SelectionColor = [Drawing.Color]::FromArgb(255,90,90)
+                $summaryView.SelectionFont = New-Object Drawing.Font('Consolas',10,[Drawing.FontStyle]::Bold)
+            } elseif ($line -match '\bHIGH\b') {
+                $summaryView.Select($offset, $len)
+                $summaryView.SelectionColor = [Drawing.Color]::FromArgb(255,160,80)
+            } elseif ($line -match '\bMED\b') {
+                $summaryView.Select($offset, $len)
+                $summaryView.SelectionColor = [Drawing.Color]::FromArgb(230,200,80)
+            } elseif ($line -match '===') {
+                $summaryView.Select($offset, $len)
+                $summaryView.SelectionColor = [Drawing.Color]::FromArgb(100,200,255)
+                $summaryView.SelectionFont = New-Object Drawing.Font('Consolas',10,[Drawing.FontStyle]::Bold)
+            } elseif ($line -match '---') {
+                $summaryView.Select($offset, $len)
+                $summaryView.SelectionColor = [Drawing.Color]::FromArgb(120,170,210)
+            }
+            $offset += $len
+        }
+        $summaryView.Select(0,0)
+    } else {
+        $summaryView.Text = "(Keine SUMMARY.txt in diesem Report)"
+    }
+
+    $findingsGrid.DataSource = $null
+    $findingsFile = Join-Path $path 'findings.csv'
+    if (Test-Path $findingsFile) {
+        try {
+            $csv = Import-Csv $findingsFile -Encoding UTF8
+            if ($csv) {
+                $dt = New-Object System.Data.DataTable
+                foreach ($col in $csv[0].PSObject.Properties.Name) { [void]$dt.Columns.Add($col) }
+                foreach ($row in $csv) {
+                    $dr = $dt.NewRow()
+                    foreach ($col in $dt.Columns) { $dr[$col.ColumnName] = [string]$row.$($col.ColumnName) }
+                    $dt.Rows.Add($dr)
+                }
+                $findingsGrid.DataSource = $dt
+                if ($findingsGrid.Columns['Severity']) {
+                    foreach ($row in $findingsGrid.Rows) {
+                        $sev = $row.Cells['Severity'].Value
+                        $color = switch ($sev) {
+                            'CRIT' { [Drawing.Color]::FromArgb(110,30,30) }
+                            'HIGH' { [Drawing.Color]::FromArgb(100,60,20) }
+                            'MED'  { [Drawing.Color]::FromArgb(80,70,20) }
+                            default { $null }
+                        }
+                        if ($color) { $row.DefaultCellStyle.BackColor = $color }
+                    }
+                }
+            }
+        } catch {}
+    }
+
+    $filesList.Items.Clear()
+    Get-ChildItem $path -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
+        [void]$filesList.Items.Add($_.Name)
+    }
+    $filesList.Tag = $path
+    $fileContent.Clear()
+}
+
+$reportCombo.Add_SelectedIndexChanged({
+    $idx = $reportCombo.SelectedIndex
+    if ($idx -lt 0) { return }
+    $paths = @($reportCombo.Tag)
+    if ($idx -lt $paths.Count) { Load-Report $paths[$idx] }
+})
+
+$filesList.Add_SelectedIndexChanged({
+    if ($filesList.SelectedItem -and $filesList.Tag) {
+        $fp = Join-Path $filesList.Tag $filesList.SelectedItem
+        if (Test-Path $fp) {
+            try { $fileContent.Text = Get-Content $fp -Raw -Encoding UTF8 }
+            catch { $fileContent.Text = "(Datei kann nicht gelesen werden: $_)" }
+        }
+    }
+})
+
+$refreshBtn.Add_Click({ Refresh-Reports })
+$openFolderBtn.Add_Click({ Start-Process explorer.exe $reportsRoot })
 
 function Invoke-ScanFile($file) {
     $path = Join-Path $scriptDir $file
     if (-not (Test-Path $path)) {
-        Write-Log "FEHLER: $file nicht gefunden in $scriptDir" 'Red'
+        Write-Log "FEHLT: $file (erwartet in $scriptDir)" 'Red'
+        Write-Log 'Stelle sicher dass alle Scan-*.ps1 im selben Ordner wie die EXE liegen!' 'Orange'
         return
     }
-    $statusLabel.Text = "Scan laeuft: $file ..."
+    $statusLabel.Text = "Scan l${AE}uft: $file ..."
     Write-Log "Starte $file"
     [System.Windows.Forms.Application]::DoEvents()
-
     try {
-        & $path *>&1 | ForEach-Object {
+        $content = Get-Content -Raw -LiteralPath $path -Encoding UTF8
+        $sb = [ScriptBlock]::Create($content)
+        $counter = 0
+        & $sb -OutputRoot $reportsRoot *>&1 | ForEach-Object {
             $line = $_.ToString()
             if ($line.Trim()) { Write-Log $line }
+            $counter++
+            if ($counter % 5 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
         }
         Write-Log "Fertig: $file" 'Cyan'
-    } catch {
-        Write-Log "Fehler: $_" 'Red'
-    }
-    $statusLabel.Text = 'Bereit.'
+    } catch { Write-Log "Fehler: $_" 'Red' }
+    $statusLabel.Text = $readyText
+    [System.Windows.Forms.Application]::DoEvents()
+    Refresh-Reports
 }
 
 foreach ($btn in $buttons) {
@@ -167,24 +496,17 @@ $allBtn.Add_Click({
     foreach ($s in $scans) { Invoke-ScanFile $s.File }
     Write-Log '===== ALLE SCANS ABGESCHLOSSEN =====' 'Yellow'
     $buttons + @($allBtn) | ForEach-Object { $_.Enabled = $true }
+    $tabs.SelectedTab = $tabReport
 })
 
-$openBtn.Add_Click({
-    $reports = Join-Path $scriptDir 'reports'
-    if (-not (Test-Path $reports)) { New-Item -ItemType Directory -Path $reports -Force | Out-Null }
-    Start-Process explorer.exe $reports
+try { Add-MpPreference -ExclusionPath $scriptDir -ErrorAction Stop } catch {}
+
+$form.Add_FormClosing({
+    try { Remove-MpPreference -ExclusionPath $scriptDir -ErrorAction SilentlyContinue } catch {}
 })
 
-# --- Defender-Exclusion-Hinweis einmal ---
-try {
-    Add-MpPreference -ExclusionPath $scriptDir -ErrorAction Stop
-    Write-Log "Defender-Exclusion fuer diesen Ordner aktiv (wird beim Schliessen entfernt)" 'Yellow'
-    $form.Add_FormClosing({
-        try { Remove-MpPreference -ExclusionPath $scriptDir -ErrorAction SilentlyContinue } catch {}
-    })
-} catch {
-    Write-Log "Hinweis: Defender kann Scans blockieren. Als Admin starten." 'Orange'
-}
-
-Write-Log 'Trojacare bereit. Ergebnisse landen in \reports\'
+Write-Log "Trojacare Lite bereit."
+Write-Log "Scripts gesucht in: $scriptDir"
+Write-Log "Reports landen in: $reportsRoot"
+Refresh-Reports
 [void]$form.ShowDialog()
