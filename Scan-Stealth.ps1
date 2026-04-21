@@ -134,14 +134,16 @@ foreach ($p in $wmiProcs) {
 # ---------- 5. Unsignierte DLLs in signierten Prozessen ----------
 Write-Host '[5] Sideloading (unsignierte DLLs)...'
 $sideloadRows = @()
-foreach ($p in (Get-Process | Where-Object { $_.Path })) {
-    $exeSig = Get-AuthenticodeSignature -FilePath $p.Path
-    if ($exeSig.Status -ne 'Valid') { continue }
-    foreach ($m in $p.Modules) {
+foreach ($p in (Get-Process | Where-Object { $_.Path -and (Test-Path $_.Path -ErrorAction SilentlyContinue) })) {
+    $exeSig = Get-AuthenticodeSignature -FilePath $p.Path -ErrorAction SilentlyContinue
+    if (-not $exeSig -or $exeSig.Status -ne 'Valid') { continue }
+    try { $modules = $p.Modules } catch { continue }
+    foreach ($m in $modules) {
         if (-not $m.FileName) { continue }
+        if (-not (Test-Path $m.FileName -ErrorAction SilentlyContinue)) { continue }
         if ($m.FileName -match '\\Users\\|\\AppData\\|\\Temp\\|\\ProgramData\\') {
-            $ms = Get-AuthenticodeSignature -FilePath $m.FileName
-            if ($ms.Status -ne 'Valid') {
+            $ms = Get-AuthenticodeSignature -FilePath $m.FileName -ErrorAction SilentlyContinue
+            if ($ms -and $ms.Status -ne 'Valid') {
                 $row = [pscustomobject]@{
                     Process = $p.ProcessName; PID = $p.Id
                     Module = $m.FileName; Status = $ms.Status
@@ -204,8 +206,11 @@ $drivers = Get-CimInstance Win32_SystemDriver | Where-Object { $_.State -eq 'Run
     $path = $_.PathName -replace '^\\\?\?\\','' -replace '"',''
     $path = $path -replace '^\\SystemRoot\\',"$env:SystemRoot\"
     $sig = $null
-    if ($path -and (Test-Path $path)) {
-        $sig = (Get-AuthenticodeSignature -FilePath $path).Status
+    if ($path -and (Test-Path $path -ErrorAction SilentlyContinue)) {
+        try {
+            $sigObj = Get-AuthenticodeSignature -FilePath $path -ErrorAction SilentlyContinue
+            if ($sigObj) { $sig = $sigObj.Status }
+        } catch {}
     }
     [pscustomobject]@{
         Name = $_.Name; DisplayName = $_.DisplayName; Path = $path; Signature = $sig

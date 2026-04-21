@@ -448,8 +448,10 @@ foreach ($d in $searchDirs) {
         ForEach-Object {
             $sig = 'Unknown'
             if ($_.Extension -in '.exe','.dll','.ps1') {
-                $s = Get-AuthenticodeSignature $_.FullName
-                $sig = "$($s.Status)"
+                try {
+                    $s = Get-AuthenticodeSignature -FilePath $_.FullName -ErrorAction SilentlyContinue
+                    if ($s) { $sig = "$($s.Status)" }
+                } catch {}
             }
             $recentExe += [pscustomobject]@{
                 Path = $_.FullName; Modified = $_.LastWriteTime; Size = $_.Length; Signature = $sig
