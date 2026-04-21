@@ -151,9 +151,17 @@ Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Enum\USBSTOR' -ErrorAction Silentl
         $props  = Get-ItemProperty $_.PSPath
         $firstInst = $null; $lastInst = $null; $lastRemove = $null
         $propsKey = Join-Path $_.PSPath 'Properties\{83da6326-97a6-4088-9453-a1923f573b29}'
-        if (Test-Path "$propsKey\0064") { $firstInst  = [datetime]::FromFileTimeUtc([bitconverter]::ToInt64((Get-ItemProperty "$propsKey\0064").'(default)',0)) }
-        if (Test-Path "$propsKey\0066") { $lastInst   = [datetime]::FromFileTimeUtc([bitconverter]::ToInt64((Get-ItemProperty "$propsKey\0066").'(default)',0)) }
-        if (Test-Path "$propsKey\0067") { $lastRemove = [datetime]::FromFileTimeUtc([bitconverter]::ToInt64((Get-ItemProperty "$propsKey\0067").'(default)',0)) }
+        function Get-RegFileTime($keyPath) {
+            if (-not (Test-Path $keyPath)) { return $null }
+            try {
+                $val = (Get-ItemProperty $keyPath -ErrorAction SilentlyContinue).'(default)'
+                if ($null -eq $val -or $val.Length -lt 8) { return $null }
+                return [datetime]::FromFileTimeUtc([bitconverter]::ToInt64($val, 0))
+            } catch { return $null }
+        }
+        $firstInst  = Get-RegFileTime "$propsKey\0064"
+        $lastInst   = Get-RegFileTime "$propsKey\0066"
+        $lastRemove = Get-RegFileTime "$propsKey\0067"
 
         $usbHistory += [pscustomobject]@{
             Kind         = 'USBSTOR'
