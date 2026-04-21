@@ -94,9 +94,9 @@ $refreshText = "${REFRESH} Aktualisieren"
 $folderText = "Report-Ordner ${OE}ffnen"
 
 $scans = @(
-    @{ Name='Netzwerk-Scan';          File='Scan-Connections.ps1'; Info='Verbindungen, Ports, Autostart, DNS-Cache';       Duration='~30 Sek' }
-    @{ Name='Stealth-Scan';           File='Scan-Stealth.ps1';     Info='Rootkit-Hinweise, WMI-Persistenz, Sideloading';    Duration='~1-2 Min' }
-    @{ Name="Forensics (30 Tage)";    File='Scan-Forensics.ps1';   Info='PC an/aus, Logons, USB-Historie, Prefetch';        Duration='~2-3 Min' }
+    @{ Name='Netzwerk-Scan';          File='Scan-Connections.ps1'; Info='Verbindungen, Ports, Autostart, DNS-Cache';       Duration='~1-2 Min' }
+    @{ Name='Stealth-Scan';           File='Scan-Stealth.ps1';     Info='Rootkit-Hinweise, WMI-Persistenz, Sideloading';    Duration='~2-3 Min' }
+    @{ Name="Forensics (30 Tage)";    File='Scan-Forensics.ps1';   Info='PC an/aus, Logons, USB-Historie, Prefetch';        Duration='~2-4 Min' }
     @{ Name='Deep-Scan';              File='Scan-Deep.ps1';        Info='AppInit, IFEO, LSA, Root-Zertifikate';             Duration='~3-5 Min' }
 )
 
@@ -218,7 +218,7 @@ foreach ($s in $scans) {
 }
 
 $allBtn = New-Object Windows.Forms.Button
-$allBtn.Text = "$allBtnText  (~7-11 Min insgesamt)"
+$allBtn.Text = "$allBtnText  (~8-14 Min insgesamt)"
 $allBtn.Location = New-Object Drawing.Point(15,($y+10))
 $allBtn.Size = New-Object Drawing.Size(910,50)
 $allBtn.BackColor = $C_GREEN
