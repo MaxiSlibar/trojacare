@@ -49,8 +49,7 @@ $AE = [char]0x00E4  # ä
 $OE = [char]0x00F6  # ö
 $SZ = [char]0x00DF  # ß
 $ARROW = [char]0x25B6 + ' '  # ▶
-$FOLDER = [char]0x1F4C1  # 📁 - kann broken sein, alternativ
-$REFRESH = [char]0x21BB  # ↻
+$REFRESH = [char]0x21BB + ' '  # ↻
 
 try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
